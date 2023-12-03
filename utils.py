@@ -19,15 +19,15 @@ def get_emploeers(url, emploeer_ids):
             "company_name": data['name'],
             "open_vacancies": data['open_vacancies']
         }
-        hh_companies.extend(hh_company)
+        hh_companies.append(hh_company)
     return hh_companies
 
 def get_vacancies(url, emploeer_ids):
     '''Получение данных о вакансиях с hh.ru'''
     params = {
         'area': 1,
-        'page': 0,
-        'per_page': 10
+        'page': 1,
+        'per_page': 100
     }
 
     formatted_vacancies = []
@@ -41,7 +41,8 @@ def get_vacancies(url, emploeer_ids):
         for vacancy in vacancies:
             published_at = datetime.strptime(vacancy['published_at'], "%Y-%m-%dT%H:%M:%S%z")
             formatted_vacancy = {
-                "employer": vacancy['department']['name'] if vacancy.get('department') else None,
+                # "employer": vacancy['department']['name'] if vacancy.get('department') else None,
+                "employer_id": int(employer_id),
                 "title": vacancy['name'],
                 "payment_from": vacancy['salary']['from'] if vacancy.get('salary') else None,
                 "payment_to": vacancy['salary']['to'] if vacancy.get('salary') else None,
@@ -56,7 +57,7 @@ def get_vacancies(url, emploeer_ids):
 
 def create_database(database_name, params):
     '''Создание базы данных и таблиц'''
-    conn = psycopg2.connection(dbname='postgres', **params)
+    conn = psycopg2.connect(dbname='postgres', **params)
     conn.autocommit = True
     cur = conn.cursor()
 
@@ -66,27 +67,26 @@ def create_database(database_name, params):
     cur.close()
     conn.close()
 
-    conn = psycopg2.connection(dbname=database_name, **params)
+    conn = psycopg2.connect(dbname=database_name, **params)
     with conn.cursor() as cur:
         cur.execute("""
-        CREATE TABLE emploeers (
-        employer_id PRIMARY KEY,
-        company_name VARCHAR,
-        open_vacancies INTEGER
+        CREATE TABLE employers (
+            employer_id INTEGER PRIMARY KEY,
+            company_name VARCHAR,
+            open_vacancies INTEGER
         )
         """)
 
-    with conn.cursor() as cur:
         cur.execute("""
         CREATE TABLE vacancies (
-        vacancy_id SERIAL PRIMARY KEY,
-        employer VARCHAR REFERENCES emploeers(company_name),
-        title TEXT,
-        payment_from INTEGER,
-        payment_to INTEGER,
-        responsibility TEXT,
-        link TEXT,
-        date DATE,
+            vacancy_id SERIAL PRIMARY KEY,
+            employer_id INTEGER REFERENCES employers(employer_id),
+            title TEXT,
+            payment_from INTEGER,
+            payment_to INTEGER,
+            responsibility TEXT,
+            link TEXT,
+            date DATE
         )
         """)
 
@@ -101,20 +101,24 @@ def save_data_to_database(data_emploeers, data_vacancies, database_name, params)
     with conn.cursor() as cur:
         for employer in data_emploeers:
             cur.execute("""
-            INSERT INTO emploeers (employer_id, company_name, open_vacancies)
-            VALUES (%s, %s, %s)
-            RETURNING
-            """,
+                    INSERT INTO employers (employer_id, company_name, open_vacancies)
+                    VALUES (%s, %s, %s)
+                    """,
                         (employer['employer_id'], employer['company_name'], employer['open_vacancies'])
-            )
+                        )
 
         for vacancy in data_vacancies:
-            cur.execute("""
-            INSERT INTO vacancies (vacancy_id, employer, title, payment_from, payment_to, responsibility, link, date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING
-            """,
-                        (vacancy['vacancy_id'], vacancy['employer'],
-                         vacancy['title'], vacancy['payment_from'], vacancy['payment_to'],
-                         vacancy['responsibility'], vacancy['link'], vacancy['date'])
+            cur.execute(
+                """
+                INSERT INTO vacancies (employer_id, title, payment_from, payment_to, responsibility, link, date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING vacancy_id
+                """,
+                (vacancy['employer_id'], vacancy['title'], vacancy['payment_from'],
+                 vacancy['payment_to'], vacancy['responsibility'], vacancy['link'], vacancy['date'])
             )
+            vacancy_id = cur.fetchone()[0]
+
+
+    conn.commit()
+    conn.close()
