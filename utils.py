@@ -1,22 +1,26 @@
 import requests
 from exception import ParsingError
 from datetime import datetime
+import psycopg2
 
 def get_emploeers(url, emploeer_ids):
     '''Получение данных о работодателях с hh.ru'''
     hh_companies = []
+    count = 1
     for employer_id in emploeer_ids:
         response = requests.get(f'{url}/employers/{employer_id}')
         if response.status_code != 200:
             raise ParsingError(f"Ошибка получения вакансий! Статус: {response.status_code}")
         data = response.json()
+        print(f'Получено {count} работодателей из {len(emploeer_ids)}')
+        count += 1
         hh_company = {
             "employer_id": int(employer_id),
             "company_name": data['name'],
             "open_vacancies": data['open_vacancies']
         }
         hh_companies.extend(hh_company)
-    print(hh_companies)
+    return hh_companies
 
 def get_vacancies(url, emploeer_ids):
     '''Получение данных о вакансиях с hh.ru'''
@@ -25,15 +29,15 @@ def get_vacancies(url, emploeer_ids):
         'page': 0,
         'per_page': 10
     }
+
     formatted_vacancies = []
-    vacancies = []
     for employer_id in emploeer_ids:
+        vacancies = []
         response = requests.get(f'{url}/vacancies?employer_id={employer_id}', params=params)
         if response.status_code != 200:
             raise ParsingError(f"Ошибка получения вакансий! Статус: {response.status_code}")
         page_vacancies = response.json()
         vacancies.extend(page_vacancies["items"])
-
         for vacancy in vacancies:
             published_at = datetime.strptime(vacancy['published_at'], "%Y-%m-%dT%H:%M:%S%z")
             formatted_vacancy = {
@@ -46,13 +50,71 @@ def get_vacancies(url, emploeer_ids):
                 'date': published_at.strftime("%d.%m.%Y"),
             }
             formatted_vacancies.append(formatted_vacancy)
-    print(formatted_vacancies)
+            print(f'Получено {len(formatted_vacancies)} вакансий')
 
-
-
+    return formatted_vacancies
 
 def create_database(database_name, params):
     '''Создание базы данных и таблиц'''
+    conn = psycopg2.connection(dbname='postgres', **params)
+    conn.autocommit = True
+    cur = conn.cursor()
 
-def save_data_to_database(data, database_name, params):
+    cur.execute(f'DROP DATABASE {database_name}')
+    cur.execute(f'CREATE DATABASE {database_name}')
+
+    cur.close()
+    conn.close()
+
+    conn = psycopg2.connection(dbname=database_name, **params)
+    with conn.cursor() as cur:
+        cur.execute("""
+        CREATE TABLE emploeers (
+        employer_id PRIMARY KEY,
+        company_name VARCHAR,
+        open_vacancies INTEGER
+        )
+        """)
+
+    with conn.cursor() as cur:
+        cur.execute("""
+        CREATE TABLE vacancies (
+        vacancy_id SERIAL PRIMARY KEY,
+        employer VARCHAR REFERENCES emploeers(company_name),
+        title TEXT,
+        payment_from INTEGER,
+        payment_to INTEGER,
+        responsibility TEXT,
+        link TEXT,
+        date DATE,
+        )
+        """)
+
+    conn.commit()
+    conn.close()
+
+def save_data_to_database(data_emploeers, data_vacancies, database_name, params):
     '''Сохранение данных в базу данных'''
+
+    conn = psycopg2.connect(dbname=database_name, **params)
+
+    with conn.cursor() as cur:
+        for employer in data_emploeers:
+            cur.execute("""
+            INSERT INTO emploeers (employer_id, company_name, open_vacancies)
+            VALUES (%s, %s, %s)
+            RETURNING
+            """,
+                        (employer['employer_id'], employer['company_name'], employer['open_vacancies'])
+            )
+
+        for vacancy in data_vacancies:
+            cur.execute("""
+            INSERT INTO vacancies (vacancy_id, employer, title, payment_from, payment_to, responsibility, link, date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING
+            """,
+                        (vacancy['vacancy_id'], vacancy['employer'],
+                         vacancy['title'], vacancy['payment_from'], vacancy['payment_to'],
+                         vacancy['responsibility'], vacancy['link'], vacancy['date'])
+            )
