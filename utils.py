@@ -27,7 +27,7 @@ def get_vacancies(url, emploeer_ids):
     params = {
         'area': 1,
         'page': 1,
-        'per_page': 100
+        'per_page': 40
     }
 
     formatted_vacancies = []
@@ -41,17 +41,16 @@ def get_vacancies(url, emploeer_ids):
         for vacancy in vacancies:
             published_at = datetime.strptime(vacancy['published_at'], "%Y-%m-%dT%H:%M:%S%z")
             formatted_vacancy = {
-                # "employer": vacancy['department']['name'] if vacancy.get('department') else None,
                 "employer_id": int(employer_id),
                 "title": vacancy['name'],
                 "payment_from": vacancy['salary']['from'] if vacancy.get('salary') else None,
                 "payment_to": vacancy['salary']['to'] if vacancy.get('salary') else None,
                 'responsibility': vacancy['snippet']['responsibility'],
-                'link': vacancy['apply_alternate_url'],
+                'link_': vacancy['apply_alternate_url'],
                 'date': published_at.strftime("%d.%m.%Y"),
             }
             formatted_vacancies.append(formatted_vacancy)
-            print(f'Получено {len(formatted_vacancies)} вакансий')
+        print(f'Получено {len(formatted_vacancies)} вакансий')
 
     return formatted_vacancies
 
@@ -85,7 +84,7 @@ def create_database(database_name, params):
             payment_from INTEGER,
             payment_to INTEGER,
             responsibility TEXT,
-            link TEXT,
+            link_ TEXT,
             date DATE
         )
         """)
@@ -110,12 +109,12 @@ def save_data_to_database(data_emploeers, data_vacancies, database_name, params)
         for vacancy in data_vacancies:
             cur.execute(
                 """
-                INSERT INTO vacancies (employer_id, title, payment_from, payment_to, responsibility, link, date)
+                INSERT INTO vacancies (employer_id, title, payment_from, payment_to, responsibility, link_, date)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING vacancy_id
                 """,
                 (vacancy['employer_id'], vacancy['title'], vacancy['payment_from'],
-                 vacancy['payment_to'], vacancy['responsibility'], vacancy['link'], vacancy['date'])
+                 vacancy['payment_to'], vacancy['responsibility'], vacancy['link_'], vacancy['date'])
             )
             vacancy_id = cur.fetchone()[0]
 
